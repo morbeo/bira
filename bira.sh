@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build Image Rotation Automation
 # https://cloud.google.com/compute/docs/images/deprecate-custom#deprecation-states
-gcp=gcloud
+GCP=gcloud
 
 function usage {
   set +x
@@ -20,7 +20,6 @@ function usage {
   echo $'\t--debug        \tincrease verbosity'
   echo $'\t--dry-run      \tdo not execute, just show commands'
   echo $'\t--help         \tthis help'
-  echo $'\t--verbose      \tmore information'
   echo
   echo 'Environment Variables'
   echo $'\tMAX_ACTIVE     \tlimit the number of ACTIVE images, default 3, default advanced 1'
@@ -43,13 +42,13 @@ function fail { if [[ "$1" ]]; then echo "ERROR: Unknown command $1"; fi; usage;
 function gcp_images_list {
   local format="$1"
   shift
-  local args="$*"
-  ${gcp} compute images list --show-deprecated --no-standard-images --format="${format}" "${args}" | sort -r
+  local args=("$@")
+  "${GCP}" compute images list --show-deprecated --no-standard-images --format="${format}" "${args[@]}"
 }
 
 function gcp_image_change_deprecate_status {
   local image=$1 state=$2
-  ${dryrun:+echo} echo "${gcp}" compute images deprecate "${image}" --state "${state}"
+  ${dryrun:+echo} "${GCP}" compute images deprecate "${image}" --state "${state}"
 }
 
 function list_families {
@@ -61,7 +60,7 @@ function list_family_images  {
   local family=$1
   local format_string='value(name)'
   local filter_string="family<=${family} AND family>=${family}"
-  gcp_images_list "${format_string}" --filter="${filter_string}"
+  gcp_images_list "${format_string}" "--filter=${filter_string}" '--sort-by=~creationTimestamp'
 }
 
 function list_images_for_deletion {
@@ -74,14 +73,14 @@ function list_images_for_deletion {
 function delete_family_images {
   local images_for_deletion family=$1
   mapfile -t images_for_deletion < <(list_images_for_deletion "${family}")
-  ${dryrun:+echo} echo "${gcp}" compute images delete "${images_for_deletion[@]}"
+  ${dryrun:+echo} "${GCP}" compute images delete "${images_for_deletion[@]}"
 }
 
 function loop_images_in_family {
   local family_images=() image family=$1
   local ACTIVE=() OBSOLETE=() DEPRECATE=() DELETED=()
   local -n status
-  mapfile -t family_images < <(list_family_images "${family}" | sort -r)
+  mapfile -t family_images < <(list_family_images "${family}")
   if [[ "${advanced}" -ne 1 ]]; then
     ACTIVE=("${family_images[@]:0:${MAX_ACTIVE:-3}}")
     DELETED=("${family_images[@]:${MAX_ACTIVE:-3}}")
@@ -103,12 +102,10 @@ function loop_images_in_family {
     if [[ -n "${status[0]}" ]]; then
       for image in "${status[@]}"; do
         gcp_image_change_deprecate_status "${image}" "${!status}"
-        if [[ "${verbose}" -eq 1 ]]; then
-          >&2 printf "${!status}: %s\n" "${image}"
-        fi
+        eval ${verbose:+printf "'${!status}: %s\n'" "${image}" >&3}
       done
     fi
-  done | column -t
+  done
   echo
 }
 
